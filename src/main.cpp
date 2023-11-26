@@ -5,33 +5,39 @@
 #include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <ArduinoJson.h>
+#include<Servo.h>
 
 ESP8266WebServer server(80);
 StaticJsonDocument<200> doc;
 const char *ntpServerName = "pool.ntp.org";
 const int utcOffsetInSeconds = 0; // Adjust this based on your time zone
 
+Servo myservo;
+int threshold = 800;
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, ntpServerName, utcOffsetInSeconds);
 int boost_duration = 30;
+int led = 4, servo_start = 0, servo_end = 180, servo_delay = 1000;
+boolean ledison = false;
 
 bool checkIsOn(){
-  // TODO - Analogue read from photoresistor
-  return true;
+  Serial.println(analogRead(A0));
+  return analogRead(A0) < threshold;
 }
 
 void toggle(bool On){
-  if(doc["is_on"] != On){
-  Serial.print("Turning - ");
-  Serial.println(On ? "On" : "Off");
-
-  // TODO - replace this with checkIsOn;
-  doc["is_on"] = On;
+  for (int i = 0; i < 3; i++) {
+    if (On != checkIsOn()){
+      Serial.print("Turning - ");
+      Serial.println(On ? "On" : "Off");
+      //TODO - Toggle servo here
+      myservo.write(servo_end);
+      delay(servo_delay);
+      myservo.write(servo_start);
+      delay(servo_delay);
+    }
   }
-  if (On != checkIsOn()){
-    //TODO - Toggle servo here
-    
-  }
+  doc["is_on"] = checkIsOn();
 }
 
 void handleRoot() {
@@ -102,14 +108,17 @@ void setup() {
   doc["boosting"] = false;
   doc["boost_remaining"]=0;
 
+  myservo.attach(5);
+  myservo.write(servo_start);
+
   Serial.begin(115200);
 
   // Connect to WiFi using WiFiManager
   WiFiManager wifiManager;
-  wifiManager.autoConnect("AutoConnectAP");
+  wifiManager.autoConnect("Heating Controller");
 
   Serial.println("Connected to WiFi");
-
+  pinMode(A0, INPUT_PULLUP);
   // Define server routes
   server.on("/", HTTP_GET, handleRoot);
   server.on("/post", HTTP_POST, handlePost);
@@ -126,12 +135,16 @@ void setup() {
   timeClient.setTimeOffset(utcOffsetInSeconds);
   timeClient.update();
 }
+
 int loopcount = 0;
+
 void loop() {
   // Handle incoming client requests
   server.handleClient();
-  if(loopcount % 50 == 0)
+  if(loopcount % 50 == 0){
     updateBoost();
+    doc["is_on"] == checkIsOn();
+  }
   loopcount++;
   delay(10);
 }
