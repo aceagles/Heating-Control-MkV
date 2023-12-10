@@ -143,7 +143,7 @@ void loop() {
   server.handleClient();
   if(loopcount % 50 == 0){
     updateBoost();
-    doc["is_on"] == checkIsOn();
+    doc["is_on"] = checkIsOn();
   }
   loopcount++;
   delay(10);
