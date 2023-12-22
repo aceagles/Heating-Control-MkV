@@ -6,11 +6,20 @@
 #include <NTPClient.h>
 #include <ArduinoJson.h>
 #include<Servo.h>
+#include<PubSubClient.h>
 
 ESP8266WebServer server(80);
 StaticJsonDocument<200> doc;
+
 const char *ntpServerName = "pool.ntp.org";
 const int utcOffsetInSeconds = 0; // Adjust this based on your time zone
+
+const char *mqtt_server = "192.168.1.140";
+const int mqtt_port = 1883;
+
+// Replace this with your MQTT topics
+const char *state_topic = "central_heating/state";
+const char *command_topic = "central_heating/cmd";
 
 Servo myservo;
 int threshold = 800;
@@ -19,6 +28,9 @@ NTPClient timeClient(ntpUDP, ntpServerName, utcOffsetInSeconds);
 int boost_duration = 30;
 int led = 4, servo_start = 0, servo_end = 180, servo_delay = 1000;
 boolean ledison = false;
+
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 bool checkIsOn(){
   Serial.println(analogRead(A0));
@@ -38,6 +50,8 @@ void toggle(bool On){
     }
   }
   doc["is_on"] = checkIsOn();
+  String cmd = doc["is_on"] ? "ON" : "OFF";
+  client.publish(state_topic, cmd.c_str());
 }
 
 void handleRoot() {
@@ -100,6 +114,46 @@ void handlePost() {
   }
 }
 
+void connectToMQTT() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.println("Connecting to MQTT...");
+
+    // Attempt to connect
+    if (client.connect("ESP8266Client")) {
+      Serial.println("Connected to MQTT");
+      // Subscribe to the command topic
+      client.subscribe(command_topic);
+    } else {
+      Serial.print("Failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" Retrying in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+void callback(char *topic, byte *payload, unsigned int length) {
+  // Handle messages received on the command topic
+  payload[length] = '\0'; // Null-terminate the payload
+  String message = String((char *)payload);
+
+  Serial.print("Received message on topic: ");
+  Serial.println(topic);
+  Serial.print("Message: ");
+  Serial.println(message);
+
+  // Add your logic to handle the received command
+  // For example, you could toggle an LED based on the command
+  // For simplicity, let's assume a "toggle" command
+  if (message.equals("ON")) {
+    // Add your code here to toggle something
+    toggle(true);
+  } else {
+    toggle(false);
+  }
+}
+
 void setup() {
   // Start Serial for debugging purposes
   
@@ -134,6 +188,12 @@ void setup() {
   timeClient.begin();
   timeClient.setTimeOffset(utcOffsetInSeconds);
   timeClient.update();
+
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+
+  // Connect to MQTT
+  connectToMQTT();
 }
 
 int loopcount = 0;
@@ -141,10 +201,19 @@ int loopcount = 0;
 void loop() {
   // Handle incoming client requests
   server.handleClient();
-  if(loopcount % 50 == 0){
+  if(loopcount % 100  == 0){
     updateBoost();
-    doc["is_on"] = checkIsOn();
+    bool temp_on = checkIsOn();
+    
+    String cmd = temp_on ? "ON" : "OFF";
+    client.publish(state_topic, cmd.c_str());
+    
+    doc["is_on"] = temp_on;
   }
+  if (!client.connected()) {
+    connectToMQTT();
+  }
+  client.loop();
   loopcount++;
   delay(10);
 }
